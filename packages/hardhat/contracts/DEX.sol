@@ -122,14 +122,48 @@ contract DEX {
 	/**
 	 * @notice sends Ether to DEX in exchange for $BAL
 	 */
-	function ethToToken() public payable returns (uint256 tokenOutput) {}
+	function ethToToken() public payable returns (uint256 tokenOutput) {
+		// Make sure the value being swapped for balloons is greater than 0
+		require(msg.value > 0, "cannot swap 0 ETH");
+		//  When we call this function, it will already have the value we sent it in it's liquidity. Make sure we are using the balance of the contract before any ETH was sent to it!
+        uint256 ethReserve = address(this).balance - msg.value;
+		// Get the balance of the other token in the contract
+        uint256 tokenReserve = token.balanceOf(address(this));
+		// Call the price() function to calculate how many tokens the user should receive for their ETH.
+        tokenOutput = price(msg.value, ethReserve, tokenReserve);
+		// Use transfer() because the contract already owns the tokens and is sending them to someone else. The transferFrom function would be used if the contract was moving tokens between two other addresses.
+        require(token.transfer(msg.sender, tokenOutput), "ethToToken(): reverted swap.");
+        emit EthToTokenSwap(msg.sender, tokenOutput, msg.value);
+        return tokenOutput;
+	}
 
 	/**
 	 * @notice sends $BAL tokens to DEX in exchange for Ether
 	 */
 	function tokenToEth(
 		uint256 tokenInput
-	) public returns (uint256 ethOutput) {}
+	) public returns (uint256 ethOutput) {
+		// Make sure the value being swapped for ETH is greater than 0
+		require(tokenInput > 0, "cannot swap 0 tokens");
+		// Check if the user has enough tokens to swap for ETH
+		require(token.balanceOf(msg.sender) >= tokenInput, "tokenToEth(): insufficient token balance");
+		// Make sure the contract has enough allowance to spend the tokens
+		require(token.allowance(msg.sender, address(this)) >= tokenInput, "tokenToEth(): insufficient allowance");
+		// Get the balance of the other token in the contract
+		uint256 tokenReserve = token.balanceOf(address(this));
+		// Call the price() function to calculate how many ETH the user should receive for their tokens.
+		ethOutput = price(tokenInput, tokenReserve, address(this).balance);
+		// Use transferFrom() because the contract is moving tokens from one address to another. Transfer tokenInput from the user to the contract.
+		require(token.transferFrom(msg.sender, address(this), tokenInput), "tokenToEth(): reverted swap.");
+		// Send the ETH to the user using call for better gas handling
+		(bool sent, ) = msg.sender.call{value: ethOutput}("");
+		require(sent, "tokenToEth: revert in transferring eth to you!");
+		// Emit the event
+		emit TokenToEthSwap(msg.sender, tokenInput, ethOutput);
+		// Return the amount of ETH the user received
+		return ethOutput;
+	}
+
 
 	/**
 	 * @notice allows deposits of $BAL and $ETH to liquidity pool
