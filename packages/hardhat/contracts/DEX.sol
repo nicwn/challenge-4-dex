@@ -16,7 +16,7 @@ contract DEX {
 
 	IERC20 token; //instantiates the imported contract
 	uint256 public totalLiquidity; // tracks the total liquidity in the exchange
-	mapping(address => uint256) public liquidity; // tracks individual liquidity contributions
+	mapping(address => uint256) public liquidity; // tracks individual liquidity contributions. Liquidity is a proportional share of the pool.
 
 	/* ========== EVENTS ========== */
 
@@ -190,7 +190,7 @@ contract DEX {
 		// Effects - Update the contract's state
 		// Calculate the amount of liquidity tokens to mint
 		uint256 liquidityMinted = msg.value * totalLiquidity / ethReserve;
-		// Update the user's liquidity balance
+		// Update the user's liquidity balance. Liquidity is a proportional share of the pool.
         liquidity[msg.sender] += liquidityMinted;
 		// Update the total liquidity in the contract
         totalLiquidity += liquidityMinted;
@@ -211,5 +211,28 @@ contract DEX {
 	 */
 	function withdraw(
 		uint256 amount
-	) public returns (uint256 ethAmount, uint256 tokenAmount) {}
+	) public returns (uint256 ethAmount, uint256 tokenAmount) {
+		// Verify that user is withdrawing an amount of liquidity that they actually have
+		require(liquidity[msg.sender] >= amount, "withdraw: sender does not have enough liquidity to withdraw.");
+		// Get the balance of both ETH and the token in the contract
+		uint256 ethReserve = address(this).balance;
+        uint256 tokenReserve = token.balanceOf(address(this));
+
+		// Calculate how much of each asset our user is going withdraw 
+		uint256 ethWithdrawn = amount * ethReserve / totalLiquidity; // the proportional ETH amount based on the user’s LP share.
+        tokenAmount = amount * tokenReserve / totalLiquidity; // proportional token amount. tokenAmount already declared as return variable in the function signature
+		
+		// Update state variables
+        liquidity[msg.sender] -= amount; // Decrease user liquidity by amount
+        totalLiquidity -= amount;  // Decrease totalLiquidity by same amount
+
+		// Transfer assets to the user
+        (bool sent, ) = payable(msg.sender).call{ value: ethWithdrawn }("");
+        require(sent, "withdraw(): revert in transferring eth to you!");
+        require(token.transfer(msg.sender, tokenAmount));
+
+		// Emit event and return values
+        emit LiquidityRemoved(msg.sender, amount, tokenAmount, ethWithdrawn);
+        return (ethWithdrawn, tokenAmount);
+	}
 }
