@@ -171,7 +171,39 @@ contract DEX {
 	 * NOTE: user has to make sure to give DEX approval to spend their tokens on their behalf by calling approve function prior to this function call.
 	 * NOTE: Equal parts of both assets will be removed from the user's wallet with respect to the price outlined by the AMM.
 	 */
-	function deposit() public payable returns (uint256 tokensDeposited) {}
+	function deposit() public payable returns (uint256 tokensDeposited) {
+		// Verify the sender has sent ETH
+		require(msg.value > 0, "deposit: must send ETH");
+		// Get ETH balance on contract before the deposit
+		uint256 ethReserve = address(this).balance - msg.value;
+		// Get the balance of the other token in the contract
+        uint256 tokenReserve = token.balanceOf(address(this));
+		// Calculate the amount of tokens the user needs to deposit
+		uint256 tokenDeposit = (msg.value * tokenReserve) / ethReserve + 1;
+
+		// Check-Effects-Interactions pattern
+		// Check - Verify the sender has enough tokens to deposit
+		require(token.balanceOf(msg.sender) >= tokenDeposit, "deposit: insufficient token balance");
+		// Check - Verify the sender has approved the contract to spend their tokens
+		require(token.allowance(msg.sender, address(this)) >= tokenDeposit, "deposit: insufficient token allowance");
+
+		// Effects - Update the contract's state
+		// Calculate the amount of liquidity tokens to mint
+		uint256 liquidityMinted = msg.value * totalLiquidity / ethReserve;
+		// Update the user's liquidity balance
+        liquidity[msg.sender] += liquidityMinted;
+		// Update the total liquidity in the contract
+        totalLiquidity += liquidityMinted;
+
+		// Interactions - Call external contracts (e.g. token transfers)
+		// Transfer tokens from the user to the contract
+		require(token.transferFrom(msg.sender, address(this), tokenDeposit));
+		// Emit the event
+        emit LiquidityProvided(msg.sender, liquidityMinted, msg.value, tokenDeposit);
+        // Return the amount of tokens the user deposited
+        return tokenDeposit;
+	}
+
 
 	/**
 	 * @notice allows withdrawal of $BAL and $ETH from liquidity pool
